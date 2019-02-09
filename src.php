@@ -12,7 +12,12 @@ class TestCase
 {
     use CrazyRevision;
 
-    private $y; //> int +get [0..100] || `$this->x != 4` -> inc && dec +set -> `1234` => xxx
+    private $x = 0; //> int +get
+
+    public function realGetX(): int
+    {
+        return $this->x;
+    }
 }
 
 $definitionPattern = '/^\s*(public|protected|private)\s*(static)?\s*\$[a-z][a-z\d]*(\s*,\s*\$[a-z][a-z\d]*)*.*?\s*\/\/>.+?$/i';
@@ -31,11 +36,46 @@ $rangeConditionPattern = '/\[(\d+(\.\d+)?)?\.\.(?(1)(\d+(\.\d+)?)?|(\d+(\.\d+)?)
 $injectedStringPattern = '/`([^`]|(?<=\\\\`))+`/';
 $conjunctionPattern = '/\s*&&\s*/';
 
+$getterTpl = <<<'PHP'
+function (): %s {
+    $var = %s;
+    %s
+}
+
+
+PHP;
+$setterTpl = <<<'PHP'
+function (%s $var): void {
+    %s
+}
+
+
+PHP;
+$fnTpl = <<<'PHP'
+function (...$args) {
+    %s
+}
+
+PHP;
+
+$conditional = <<<'PHP'
+if (%s) {
+    %s;
+    %s;
+} else {
+    throw new CrazyException('Conditions for %s::%s() did not pass');
+}
+PHP;
+$nonConditional = <<<'PHP'
+%s;
+%s;
+PHP;
+
+
 $classes = get_declared_classes();
 $predefinedClassesCount = 135;
 $userDefinedClasses = array_slice($classes, $predefinedClassesCount);
 
-$totalImports = [];
 foreach ($userDefinedClasses as $className) {
     /** @noinspection PhpUnhandledExceptionInspection */
     $class = new ReflectionClass($className);
@@ -69,6 +109,19 @@ foreach ($userDefinedClasses as $className) {
         }
         $typeDeclaration = array_shift($matches);
         $comment = substr($comment, strlen($typeDeclaration));
+
+        $type = $typeDeclaration;
+        switch ($typeDeclaration) {
+            case 'int':
+            case 'float':
+            case 'double':
+            case 'bool':
+            case 'string':
+            case 'callable':
+            case 'object':
+            case 'resource':
+                $typeDeclaration = sprintf('Crazy%s', ucfirst($typeDeclaration));
+        }
 
         $imports = [];
         while (true) {
@@ -122,24 +175,32 @@ foreach ($userDefinedClasses as $className) {
                 $conditions
             );
 
+            if ($conditions === '') {
+                $conditions = 'true';
+            }
+
             $comment = ltrim($comment);
             preg_match($callbacksPattern, $comment, $matches);
-            $callbacks  = array_shift($matches);
+            $callbacks = array_shift($matches);
             $comment = substr($comment, $callbacks !== null ? strlen($callbacks) + 2 : 0);
 
-            $callbacks = preg_split($conjunctionPattern, $callbacks);
-            array_walk(
-                $callbacks,
-                function (string &$element) use ($typeDeclaration): void {
-                    if (strpos($element, '`') !== false) {
-                        $element = trim($element, '` ');
-                    } else {
-                        $element = trim($element);
-                        $element = sprintf('$var = %s::%s($var)', $typeDeclaration, $element);
+            if ($callbacks !== null) {
+                $callbacks = preg_split($conjunctionPattern, $callbacks);
+                array_walk(
+                    $callbacks,
+                    function (string &$element) use ($typeDeclaration): void {
+                        if (strpos($element, '`') !== false) {
+                            $element = trim($element, '` ');
+                        } else {
+                            $element = trim($element);
+                            $element = sprintf('$var = %s::%s($var)', $typeDeclaration, $element);
+                        }
                     }
-                }
-            );
-            $callbacks = implode(';', $callbacks);
+                );
+                $callbacks = implode(';', $callbacks);
+            } else {
+                $callbacks = '';
+            }
 
             $imports[] = [$accessModifier, $methodImport, $conditions, $callbacks];
         }
@@ -171,19 +232,78 @@ foreach ($userDefinedClasses as $className) {
             );
         }
 
-        foreach ($properties as $property) {
-            $currentImports = $imports;
-            array_walk(
-                $currentImports,
-                function (array &$import) use ($property): void {
-                    $import[] = $import[1];
-                    $import[1] .= ucfirst($property);
-                }
-            );
+        if (strpos($line, 'static') !== false) {
+            $fieldReferenceTpl = 'self::$%s';
+        } else {
+            $fieldReferenceTpl = '$this->%s';
+        }
 
-            $totalImports = array_merge($totalImports, $currentImports);
+        foreach ($properties as $property) {
+            foreach ($imports as $import) {
+                list($accessModifier, $methodImport, $conditions, $callbacks) = $import;
+                $fieldReference = sprintf($fieldReferenceTpl, $property);
+                $methodName = $methodImport . ucfirst($property);
+
+                if ($methodImport === 'get') {
+                    $action = 'return $var';
+                } elseif ($methodImport === 'set') {
+                    $action = sprintf('%s = $var', $fieldReference);
+                } else {
+                    $action = sprintf('return %s::%s(%s, ...$args)', $typeDeclaration, $methodImport, $fieldReference);
+                }
+
+                if ($conditions === 'true') {
+                    $code = sprintf($nonConditional, $callbacks, $action);
+                } else {
+                    $code = sprintf($conditional, $conditions, $callbacks, $action, $class->name, $methodName);
+                }
+
+                switch ($methodImport) {
+                    case 'get':
+                        $function = sprintf($getterTpl, $type, $fieldReference, $code);
+                        break;
+                    case 'set':
+                        $function = sprintf($setterTpl, $type, $code);
+                        break;
+                    default:
+                        $function = sprintf($fnTpl, $code);
+                }
+
+//                echo $function;
+
+                $flags = 0;
+                if (strpos($line, 'static') !== false) {
+                    $flags |= ZEND_ACC_STATIC;
+                }
+                switch ($accessModifier) {
+                    case '+':
+                        $flags |= ZEND_ACC_PUBLIC;
+                        break;
+                    case '#':
+                        $flags |= ZEND_ACC_PROTECTED;
+                        break;
+                    case '-':
+                        $flags |= ZEND_ACC_PRIVATE;
+                }
+
+                $closure = eval(sprintf('return %s;', $function));
+                uopz_add_function($class->name, $methodName, $closure, $flags, true);
+            }
         }
     }
 }
 
-print_r($totalImports);
+
+$test = new TestCase();
+
+$time = microtime(true);
+for ($i = 0; $i < 1e3; $i++) {
+    $test->realGetX();
+}
+echo (microtime(true) - $time) . PHP_EOL;
+
+$time = microtime(true);
+for ($i = 0; $i < 1e3; $i++) {
+    $test->getX();
+}
+echo (microtime(true) - $time) . PHP_EOL;
