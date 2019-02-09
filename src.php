@@ -8,26 +8,34 @@ trait CrazyRevision
 {
 }
 
+class TestCase
+{
+    use CrazyRevision;
+
+    private $y; //> int +get [0..100] || `$this->x != 4` -> inc && dec +set -> `1234` => xxx
+}
+
 $definitionPattern = '/^\s*(public|protected|private)\s*(static)?\s*\$[a-z][a-z\d]*(\s*,\s*\$[a-z][a-z\d]*)*.*?\s*\/\/>.+?$/i';
 $propertyPattern = '/(?<=\$)[a-z][a-z\d]*/i';
-$commentPattern = '/^(?<=\/\/>).+?$/';
+$commentPattern = '/(?<=\/\/>).+?$/';
 
 $typeDeclarationPattern = '/^([a-z][a-z\d]*(<(?1)>)?(\[\])*)/i';
-$accessModifierPattern = '/^(+|#|-)/';
+$accessModifierPattern = '/^(\+|#|-)/';
 $methodImportPattern = '/^[a-z][a-z\d]*/i';
-$conditionsPattern = '/^(((\()?\[(\d+(\.\d+)?)\.\.(?(4)((\d+(\.\d+)?|((\d+(\.\d+)))\]|`([^`]|(?<=\\\\`))+`)(\s+(&&|\|\|)\s+(?1))(?(3)\)))*/';
-$callbacksPattern = '/^(?<=->)\s*([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`)(\s+&&\s+([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`))*/i';
-$aliasPattern = '/^(?<==>)\s+[a-z][a-z\d]*/';
+$conditionsPattern = '/^((\()?(\[(\d+(\.\d+)?)?\.\.(?(4)(\d+(\.\d+)?)?|(\d+(\.\d+)?))\]|`([^`]|(?<=\\\\`))+`)(\s*(&&|\|\|)\s*(?1))*(?(2)\)))/';
+$callbacksPattern = '/(?<=^->)\s*([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`)(\s+&&\s+([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`))*/i';
+$aliasPattern = '/(?<=^=>)\s+[a-z][a-z\d]*/';
 $userCommentPattern = '/^--.+/';
 
-$rangeConditionPattern = '/\[(\d+(\.\d+)?)\.\.(?(2)((\d+(\.\d+)?|((\d+(\.\d+)))\]/';
+$rangeConditionPattern = '/\[(\d+(\.\d+)?)?\.\.(?(1)(\d+(\.\d+)?)?|(\d+(\.\d+)?))\]/';
 $injectedStringPattern = '/`([^`]|(?<=\\\\`))+`/';
 $conjunctionPattern = '/\s*&&\s*/';
 
 $classes = get_declared_classes();
-$predefinedClassesCount = 134;
+$predefinedClassesCount = 135;
 $userDefinedClasses = array_slice($classes, $predefinedClassesCount);
 
+$totalImports = [];
 foreach ($userDefinedClasses as $className) {
     /** @noinspection PhpUnhandledExceptionInspection */
     $class = new ReflectionClass($className);
@@ -38,19 +46,20 @@ foreach ($userDefinedClasses as $className) {
     $file = new SplFileObject($class->getFileName());
     foreach ($file as $lineNumber => $line) {
         $isValidLineNumber = $lineNumber >= $class->getStartLine() && $lineNumber <= $class->getEndLine();
-        $isDefinition = preg_match($definitionPattern, $file->getCurrentLine());
+        $isDefinition = preg_match($definitionPattern, $line);
         if (!($isValidLineNumber && $isDefinition)) {
             continue;
         }
 
         $properties = [];
-        $matches = [];
+        preg_match_all($propertyPattern, substr($line, 0, strpos($line, '//>')), $properties);
+        $properties = array_shift($properties);
 
-        preg_match($propertyPattern, $file->getCurrentLine(), $properties);
-        preg_match($commentPattern, $file->getCurrentLine(), $matches);
+        $matches = [];
+        preg_match($commentPattern, $line, $matches);
         $comment = array_shift($matches);
 
-        $comment = ltrim($comment);
+        $comment = trim($comment);
         $success = preg_match($typeDeclarationPattern, $comment, $matches);
         if (!$success) {
             /** @noinspection PhpUnhandledExceptionInspection */
@@ -61,6 +70,7 @@ foreach ($userDefinedClasses as $className) {
         $typeDeclaration = array_shift($matches);
         $comment = substr($comment, strlen($typeDeclaration));
 
+        $imports = [];
         while (true) {
             $comment = ltrim($comment);
             $success = preg_match($accessModifierPattern, $comment, $matches);
@@ -87,7 +97,8 @@ foreach ($userDefinedClasses as $className) {
 
             $conditions = preg_replace_callback(
                 $rangeConditionPattern,
-                function (string $subject): string {
+                function (array $matches): string {
+                    $subject = array_shift($matches);
                     $subject = trim($subject, '[]');
                     $bounds = explode('..', $subject);
 
@@ -104,8 +115,9 @@ foreach ($userDefinedClasses as $className) {
             );
             $conditions = preg_replace_callback(
                 $injectedStringPattern,
-                function (string $subject): string {
-                    return trim($subject, '[]');
+                function (array $matches): string {
+                    $subject = array_shift($matches);
+                    return sprintf('(%s)', trim($subject, '`'));
                 },
                 $conditions
             );
@@ -113,27 +125,38 @@ foreach ($userDefinedClasses as $className) {
             $comment = ltrim($comment);
             preg_match($callbacksPattern, $comment, $matches);
             $callbacks  = array_shift($matches);
-            $comment = substr($comment, strlen($callbacks ?? ''));
+            $comment = substr($comment, $callbacks !== null ? strlen($callbacks) + 2 : 0);
 
             $callbacks = preg_split($conjunctionPattern, $callbacks);
             array_walk(
                 $callbacks,
-                function (string $element) use ($typeDeclaration): string {
-                    $trimmed = trim($element, '`');
-                    if ($trimmed !== $element) {
-                        return $trimmed;
+                function (string &$element) use ($typeDeclaration): void {
+                    if (strpos($element, '`') !== false) {
+                        $element = trim($element, '` ');
                     } else {
-                        return sprintf('$var = %s::%s()', $typeDeclaration, $element);
+                        $element = trim($element);
+                        $element = sprintf('$var = %s::%s($var)', $typeDeclaration, $element);
                     }
                 }
             );
             $callbacks = implode(';', $callbacks);
+
+            $imports[] = [$accessModifier, $methodImport, $conditions, $callbacks];
         }
 
         $comment = ltrim($comment);
         preg_match($aliasPattern, $comment, $matches);
         $alias = array_shift($matches);
-        $comment = substr($comment, strlen($alias ?? ''));
+        $comment = substr($comment, $alias !== null ? strlen($alias) + 2 : 0);
+        if ($alias !== null && count($properties) !== 1) {
+            /** @noinspection PhpUnhandledExceptionInspection */
+            throw new CrazyException(
+                sprintf('Cannot use alias for multiple properties in %s on line %d', $file->getFilename(), $lineNumber)
+            );
+        }
+        if ($alias !== null) {
+            $properties[0] = trim($alias);
+        }
 
         $comment = ltrim($comment);
         preg_match($userCommentPattern, $comment, $matches);
@@ -147,5 +170,20 @@ foreach ($userDefinedClasses as $className) {
                 sprintf('Unknown tokens in %s on line %d', $file->getFilename(), $lineNumber)
             );
         }
+
+        foreach ($properties as $property) {
+            $currentImports = $imports;
+            array_walk(
+                $currentImports,
+                function (array &$import) use ($property): void {
+                    $import[] = $import[1];
+                    $import[1] .= ucfirst($property);
+                }
+            );
+
+            $totalImports = array_merge($totalImports, $currentImports);
+        }
     }
 }
+
+print_r($totalImports);
