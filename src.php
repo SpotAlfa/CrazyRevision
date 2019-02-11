@@ -48,7 +48,7 @@ foreach ($userDefinedClasses as $className) {
         $comment = array_shift($matches);
 
         $comment = trim($comment);
-        $typeDeclarationPattern = '/^([a-z][a-z\d]*(\[\])*/i';
+        $typeDeclarationPattern = '/^[a-z][a-z\d]*(\[\])?/i';
         preg_match($typeDeclarationPattern, $comment, $matches);
         if (!empty($matches)) {
             $typeDeclaration = array_shift($matches);
@@ -58,13 +58,23 @@ foreach ($userDefinedClasses as $className) {
             throw new CrazyException(sprintf('Cannot find type declaration in %s on line %d', $filename, $lineNumber));
         }
 
+        $primitiveTypes = ['int', 'float', 'double', 'bool', 'string', 'callable', 'object', 'iterable', 'array'];
+
         $realType = $typeDeclaration;
         if (strpos($typeDeclaration, '[]') !== false) {
             $realType = 'array';
+            $baseType = substr($typeDeclaration, 0, strlen($typeDeclaration) - strlen('[]'));
+            if (in_array($baseType, $primitiveTypes)) {
+                $action = sprintf('is_%s($element)', $baseType);
+            } else {
+                $action = sprintf('$element instanceof %s', $baseType);
+            }
+            $arrayCondition = sprintf(
+                'array_reduce($var, function(bool $carry, $element): bool { return $carry && %s; }, true)', $action
+            );
         }
 
         $typeReference = $typeDeclaration;
-        $primitiveTypes = ['int', 'float', 'double', 'bool', 'string', 'callable', 'object', 'resource', 'iterable'];
         if (in_array($typeDeclaration, $primitiveTypes)) {
             $typeReference = sprintf('Crazy%s', ucfirst($typeReference));
         }
@@ -129,7 +139,11 @@ foreach ($userDefinedClasses as $className) {
 
                 $conditions = preg_replace_callback($rangeConditionsPattern, $replaceRangeConditions, $conditions);
                 $conditions = preg_replace_callback($injectedCodePattern, $replaceInjectedConditions, $conditions);
+                $conditions = sprintf('%s && %s', @$arrayCondition, $conditions);
+            } else {
+                $conditions = @$arrayCondition;
             }
+
 
             $comment = trim($comment);
             $callbacksPattern = '/(?<=^->)\s*([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`)' .
