@@ -48,7 +48,7 @@ foreach ($userDefinedClasses as $className) {
         $comment = array_shift($matches);
 
         $comment = trim($comment);
-        $typeDeclarationPattern = '/^([a-z][a-z\d]*(<(?1)>)?(\[\])*)/i';
+        $typeDeclarationPattern = '/^([a-z][a-z\d]*(\[\])*/i';
         preg_match($typeDeclarationPattern, $comment, $matches);
         if (!empty($matches)) {
             $typeDeclaration = array_shift($matches);
