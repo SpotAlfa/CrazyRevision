@@ -144,7 +144,6 @@ foreach ($userDefinedClasses as $className) {
                 $conditions = @$arrayCondition;
             }
 
-
             $comment = trim($comment);
             $callbacksPattern = '/(?<=^->)\s*([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`)' .
                 '(\s+&&\s+([a-z][a-z\d]*|`([^`]|(?<=\\\\`))+`))*/i';
@@ -224,7 +223,7 @@ foreach ($userDefinedClasses as $className) {
                         break;
                     default:
                         $action = sprintf(
-                            'return %s::%s(%s, $var, ...$args)',$typeReference, $import->methodName, $propertyReference
+                            'return %s::%s(%s, $var, ...$args)', $typeReference, $import->methodName, $propertyReference
                         );
                 }
 
@@ -232,7 +231,7 @@ foreach ($userDefinedClasses as $className) {
                     $conditionalTemplate = 'if (%s) { %s; %s; } ' .
                         'else { throw new CrazyException("Conditions for %s::%s() did not pass"); }';
                     $code = sprintf(
-                        $conditionalTemplate, $import->conditions, $import->callbacks, $action, $class->name,  $method
+                        $conditionalTemplate, $import->conditions, $import->callbacks, $action, $class->name, $method
                     );
                 } else {
                     $nonConditionalClauseTemplate = '{ %s; %s; }';
