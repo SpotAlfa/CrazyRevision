@@ -59,6 +59,10 @@ foreach ($userDefinedClasses as $className) {
         }
 
         $realType = $typeDeclaration;
+        if (strpos($typeDeclaration, '[]') !== false) {
+            $realType = 'array';
+        }
+
         $typeReference = $typeDeclaration;
         $primitiveTypes = ['int', 'float', 'double', 'bool', 'string', 'callable', 'object', 'resource', 'iterable'];
         if (in_array($typeDeclaration, $primitiveTypes)) {
