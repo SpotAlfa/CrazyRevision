@@ -159,7 +159,7 @@ foreach ($userDefinedClasses as $className) {
                     if ($withoutQuotes != $element) {
                         $element = $withoutQuotes;
                     } else {
-                        $element = sprintf('%s::%s($var)', $typeReference, $element);
+                        $element = sprintf('%s::handler_%s($var)', $typeReference, $element);
                     }
                 }
 
@@ -223,7 +223,10 @@ foreach ($userDefinedClasses as $className) {
                         break;
                     default:
                         $action = sprintf(
-                            'return %s::%s(%s, $var, ...$args)', $typeReference, $import->methodName, $propertyReference
+                            'return %s::import_%s(%s, $var, ...$args)',
+                            $typeReference,
+                            $import->methodName,
+                            $propertyReference
                         );
                 }
 
