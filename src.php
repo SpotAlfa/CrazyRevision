@@ -1,5 +1,10 @@
 <?php
 
+namespace SpotAlfa\Axessors\CrazyRevision;
+
+use Exception;
+use ReflectionClass;
+
 trait CrazyRevision
 {
 }
