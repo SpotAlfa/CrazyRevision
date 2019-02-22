@@ -1,31 +1,23 @@
-<?php
+<?php /** @noinspection PhpUndefinedMethodInspection */
 
-class TestCase
+namespace SpotAlfa\Axessors\CrazyRevision\Tests;
+
+require __DIR__ . '/src.php';
+
+use SpotAlfa\Axessors\CrazyRevision\CrazyRevision;
+use SpotAlfa\Axessors\CrazyRevision\CrazyStartup;
+
+class Point
 {
-    public function a(): void
+    private $x, $y; //> float +get -set -> `$var *= 2`
+
+    public function __construct(float $x, float $y)
     {
-        if (true) {
-            $this->c();
-        }
+        $this->setX($x);
+        $this->setY($y);
     }
-
-    public function b(): void {
-        $this->c();
-    }
-
-    private function c(): void {}
 }
 
-$test = new TestCase();
-
-$time = microtime(true);
-for ($i = 0; $i < 1e3; $i++) {
-    $test->a();
-}
-echo (microtime(true) - $time) . PHP_EOL;
-
-$time = microtime(true);
-for ($i = 0; $i < 1e3; $i++) {
-    $test->b();
-}
-echo (microtime(true) - $time) . PHP_EOL;
+$timestamp = microtime(true);
+CrazyStartup::run();
+echo (microtime(true) - $timestamp);
